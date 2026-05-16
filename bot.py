@@ -1,18 +1,25 @@
 import asyncio
 import json
 import os
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiohttp import web
+
+# --------------------
+# 🔑 ТОКЕН ВСТАВЛЯЕШЬ СЮДА
+# --------------------
 
 TOKEN = "8980941844:AAHAN54PXJMgFPrlwOpZEzLGiGeDHJ-iNu8"
+
 DATA_FILE = "data.json"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # --------------------
-# ЗАГРУЗКА ДАННЫХ
+# DATA
 # --------------------
 
 def load_data():
@@ -29,7 +36,7 @@ def save_data(data):
 user_data = load_data()
 
 # --------------------
-# ФРАЗЫ ПО ДНЯМ
+# ФРАЗЫ
 # --------------------
 
 PHRASE_MAP = {
@@ -48,9 +55,7 @@ PHRASE_MAP = {
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "Напиши привычку и месяц.\n\n"
-        "Например:\n"
-        "спорт январь"
+        "Напиши привычку и месяц.\n\nПример:\nспорт январь"
     )
 
 # --------------------
@@ -61,18 +66,12 @@ def create_keyboard(days):
     kb = InlineKeyboardBuilder()
 
     for i in range(1, 32):
-
         day = str(i)
-
         text = "✔️" if day in days else day
 
-        kb.button(
-            text=text,
-            callback_data=day
-        )
+        kb.button(text=text, callback_data=day)
 
     kb.adjust(7)
-
     return kb.as_markup()
 
 # --------------------
@@ -82,18 +81,17 @@ def create_keyboard(days):
 @dp.message()
 async def create_tracker(message: types.Message):
 
-    if " " not in message.text:
+    if not message.text or " " not in message.text:
         return
 
     habit, month = message.text.split(" ", 1)
-
     user_id = str(message.from_user.id)
 
     user_data[user_id] = {
         "habit": habit,
         "month": month,
         "days": [],
-        "sent_days": []  # 👈 дни, где уже была фраза
+        "sent_days": []
     }
 
     save_data(user_data)
@@ -104,14 +102,13 @@ async def create_tracker(message: types.Message):
     )
 
 # --------------------
-# НАЖАТИЕ КНОПОК
+# НАЖАТИЯ КНОПОК
 # --------------------
 
 @dp.callback_query()
 async def click(callback: types.CallbackQuery):
 
     user_id = str(callback.from_user.id)
-
     data = user_data.get(user_id)
 
     if not data:
@@ -119,27 +116,16 @@ async def click(callback: types.CallbackQuery):
 
     day = callback.data
 
-    # ----------------
-    # СТАВИМ / УБИРАЕМ
-    # ----------------
-
     if day in data["days"]:
         data["days"].remove(day)
-
     else:
         data["days"].append(day)
 
-        # ----------------
-        # ФРАЗА ТОЛЬКО 1 РАЗ
-        # ----------------
-
         if day in PHRASE_MAP and day not in data["sent_days"]:
-
             await bot.send_message(
                 callback.message.chat.id,
                 PHRASE_MAP[day]
             )
-
             data["sent_days"].append(day)
 
     save_data(user_data)
@@ -151,12 +137,33 @@ async def click(callback: types.CallbackQuery):
     await callback.answer()
 
 # --------------------
-# ЗАПУСК
+# WEB (нужен для Render)
+# --------------------
+
+async def handle(request):
+    return web.Response(text="Bot is running")
+
+async def start_web():
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+
+    port = int(os.environ.get("PORT", 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+# --------------------
+# MAIN
 # --------------------
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+
+    await asyncio.gather(
+        dp.start_polling(bot),
+        start_web()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
